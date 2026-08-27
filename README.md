@@ -214,6 +214,59 @@ Run it:
 main_spiral1_test           % prints the tables, writes figures/spiral1_*.png
 ```
 
+## Stage 4 — Monte-Carlo acquisition of moving points (scan failure)
+
+`spiralAcqSim.m` + `eciToAzElVec.m` + `main_points_acq_test.m` replace the
+analytic FOU with **N = 3000 candidate points** drawn from the in-track
+covariance. Each point is a fixed RIC offset (a hypothesis) propagated through
+`ECI→ENU`, so the cloud translates, rotates and breathes exactly like the
+analytic FOU — but now every point has its own moving sky track.
+
+Above a detectable elevation (default 20°) the gimbal scans the mean path with
+an **overlapping Archimedean spiral**: point `k` at `θ_k = √(4πk)`,
+`r_k = p·√(k/π)`, pitch `p = α·Rbeam` (α<2 ⇒ footprint overlap — the requested
+`θ_k ∝ √k` construction). Point `k` is visited at time `t_k` from traversing the
+spiral under the gimbal/PRF limits (velocity, PRF no-gap, centripetal
+acceleration, all with the `1/cos(el)` keyhole). A candidate is **acquired** the
+first time a scan point lands within `Rbeam` of the candidate's position **at that
+point's visit time** — so a point is missed if the moving cloud is never
+coincident with the beam while the beam is there.
+
+Result (N=3000, detElev 20°, α=1):
+
+```
+                     5"      10"    20"   50"  100"  200"
+Starlink 35978     92.8%   99.2%  100%  100%  100%  100%
+Starlink 31742     92.5%   99.2%  100%  100%  100%  100%
+COSMOS 1052        100%    100%   100%  100%  100%  100%
+```
+
+The scan **fails** (acq < 100%) for the fine beams on the fast Starlink passes:
+
+* `acq_sky_snapshot.png` — the missed points are the **extreme cross-elevation
+  tips**, i.e. the far along-track (timing) outliers of the elongated FOU. Near
+  culmination these reach the largest angular excursion and move fastest, and
+  the slow fine-beam spiral never reaches them in time.
+* `acq_cumulative.png` — the failure mechanism in time: the 5″ curve climbs to
+  ~87 % in the first ~50 s (low elevation, compact FOU), then **plateaus through
+  the whole high-elevation phase** — the ballooning FOU has outrun the spiral, so
+  no new points are acquired around culmination — and only resumes on the descent
+  as the FOU shrinks, ending at ~93 % when the pass runs out.
+* COSMOS (longer pass, smaller angular FOU) keeps up at every beam.
+
+So a single conventional overlapping spiral, with a fine beam and the real gimbal
+limits, cannot guarantee acquisition of a **moving** FOU on a fast overhead pass.
+The result is sensitive to the detectable-elevation floor (a lower floor gives the
+spiral more low-elevation time to sweep the compact FOU early). This is the
+quantitative "scan can fail as the FOU moves" demonstration and the motivation for
+a motion-aware / FOU-adaptive scan.
+
+Run it:
+
+```matlab
+main_points_acq_test        % prints acquisition tables, writes figures/acq_*.png
+```
+
 ## Where this sits in the larger problem
 
 The projected FOU here is exactly the **moving, rotating, elongated uncertainty
