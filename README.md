@@ -160,6 +160,60 @@ Run it:
 main_conventional_scan      % prints the tables, writes figures/scan_*.png
 ```
 
+## Stage 3 — spiral-vs-FOU race (time-varying FOU)
+
+`spiralExitTime.m` + `main_spiral1_test.m` relax the frozen-FOU assumption of
+Stage 2. Acquisition begins at first visibility (**elevation 10°, rising**) and
+an Archimedean spiral is started from the FOU centre, winding **outward** at the
+gimbal/PRF-limited rate. At every epoch the spiral radius `r_spiral(t)` is
+compared with the current 3σ FOU semi-axes `a(t)`, `b(t)`.
+
+Key physical point (corrects the "FOU shrinks" intuition): from 10° on the way
+up the angular FOU **grows** (1/range) to a maximum at culmination, then shrinks.
+So an outward spiral and the FOU can cross **more than once**. Two times are
+reported per beam width:
+
+* `t_first` — spiral radius first reaches `a(t)` (first encloses the small
+  initial FOU), and
+* `t_persist` — the epoch after which `r_spiral(t) ≥ a(t)` for the **rest of the
+  pass** (the FOU never overtakes the spiral again). This is the meaningful
+  "FOU permanently covered" time.
+
+Result (start elev 10°, α = 0):
+
+```
+                       t_first[s]   t_persist[s]   elev@persist
+Starlink 35978  5"        17           259            63°   <- FOU outruns the slow spiral to culmination
+                10"        8             8            11°
+               20-200"    1             1           ~10°
+COSMOS 1052    5"         7             7            10°
+```
+
+Reading `spiral1_race.png`: the FOU `a(t)` is the red hump (683 → 4962 → 645
+µrad). Beams ≥ 10″ expand fast enough to clear the hump in the first seconds and
+stay outside for the whole pass. The **5″ spiral is too slow**: it clears the
+tiny initial FOU at 17 s, but the ballooning FOU climbs back **above** it from
+~30 s to 259 s — i.e. for ~4 minutes around culmination the FOU rim sits
+*outside* the 5″ spiral (uncovered) — and only on the descent, as the FOU
+shrinks, does the spiral permanently enclose it (dot at 259 s, elev 63°).
+
+So with the finest beam a single outward spiral cannot keep up with the FOU
+growth near zenith; a coarser beam, or a scan that adapts to the growing FOU, is
+required. This is the frozen-FOU caveat of Stage 2 made quantitative, and points
+straight at the time-coupled / FOU-adaptive scan design.
+
+Model note: `spiralExitTime.m` integrates `r_spiral(t)` with quasi-steady speed
+caps (PRF no-gap, axis velocity, and centripetal acceleration, all with the
+`1/cos(el)` azimuth keyhole). It is a geometric race (spiral radius vs FOU
+radius), independent of the Stage-2 time-optimal traversal, and slightly
+conservative.
+
+Run it:
+
+```matlab
+main_spiral1_test           % prints the tables, writes figures/spiral1_*.png
+```
+
 ## Where this sits in the larger problem
 
 The projected FOU here is exactly the **moving, rotating, elongated uncertainty
