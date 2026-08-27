@@ -4,11 +4,15 @@ function out = spiralAcqSim(tGrid, elMean, dCross, dEl, rho, Rbeam, alpha, hw, R
 %               outward, overlapping Archimedean-spiral scan.
 %
 %   The gimbal tracks the mean trajectory and superimposes an Archimedean
-%   spiral of OVERLAPPING scan points. Point k sits at polar angle
-%   theta_k = sqrt(4*pi*k) and radius r_k = (p/2pi)*theta_k = p*sqrt(k/pi),
-%   with p = alpha*Rbeam the arm pitch = along-arc point spacing (alpha<2
-%   gives footprint overlap; this realises the requested theta_k ~ sqrt(k)
-%   overlapping construction). The beam visits point k at time t_k, obtained
+%   spiral of scan points placed by the constant-linear-velocity rule:
+%       r(theta) = theta * R_s/(2*pi),   R_s = 2*alpha*Rbeam,
+%       theta_k  = sqrt(4*pi*k),  =>  r_k = R_s*sqrt(k/pi).
+%   One turn (theta += 2*pi) advances r by exactly R_s, and the along-arc
+%   point spacing is also R_s, so R_s is both the arm pitch and the point
+%   spacing. alpha is the overlap factor: alpha = 1/sqrt(2) gives R_s =
+%   sqrt(2)*Rbeam (full coverage, the diagonal interstice just reaches Rbeam),
+%   alpha = 1 gives R_s = 2*Rbeam (footprints tangent, leaving diagonal gaps).
+%   The beam visits point k at time t_k, obtained
 %   by traversing the spiral under the gimbal/PRF speed limits (velocity,
 %   PRF no-gap, and centripetal acceleration, all with the 1/cos(el) azimuth
 %   keyhole), exactly as in the earlier stages.
@@ -51,8 +55,9 @@ function out = spiralAcqSim(tGrid, elMean, dCross, dEl, rho, Rbeam, alpha, hw, R
     dtG = tGrid(2) - tGrid(1);
 
     % ---- spiral scan-point geometry (vectorised) ---------------------
-    p  = alpha * Rbeam;                       % arm pitch = point spacing
-    b  = p/(2*pi);
+    Rs = 2*alpha*Rbeam;                       % arm pitch = along-arc spacing
+    p  = Rs;                                  % (speed cap below uses p as R_s)
+    b  = p/(2*pi);                            % r(theta) = (R_s/2pi)*theta
     Kmax = max(4, ceil(pi*(RmaxCover/p)^2));  % r_K ~ RmaxCover
     k  = (1:Kmax);
     th = sqrt(4*pi*k);

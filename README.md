@@ -267,6 +267,56 @@ Run it:
 main_points_acq_test        % prints acquisition tables, writes figures/acq_*.png
 ```
 
+## Stage 4b — constant-linear-velocity spiral, overlap factor, N = 40000
+
+The spiral scan-point allocation was set to the constant-linear-velocity
+Archimedean rule the user specified:
+
+```
+r(theta) = theta * R_s/(2*pi),   R_s = 2*alpha*Rbeam,   theta_k = sqrt(4*pi*k)
+=> r_k = R_s*sqrt(k/pi)   (one turn advances r by exactly R_s; arc spacing = R_s)
+```
+
+`alpha` is the overlap factor: `alpha = 1/sqrt(2)` → `R_s = sqrt(2)·Rbeam` (the
+critical square-packing spacing, full coverage); `alpha = 1` → `R_s = 2·Rbeam`
+(footprints tangent, leaving interstitial gaps). `main_points_acq_test.m` now
+runs **N = 40000** points, both `alpha`, all beam widths, and reports overall
+**and rim** (outer 10 %) acquisition.
+
+```
+Starlink 35978        alpha = 1/sqrt(2)          alpha = 1
+   beam"          overall     rim          overall     rim
+     5             96.1%     63.7%           81.4%     83.3%
+    10             99.8%     98.5%           80.3%     85.8%
+    20             99.7%    100.0%           78.6%     83.0%
+    50             98.3%    100.0%           72.5%     80.9%
+   100             94.2%    100.0%           58.9%     78.8%
+   200             84.3%     98.9%           40.1%     66.0%
+```
+
+This resolves the earlier "why is it >90 %?" puzzle — that run used a much
+tighter spacing. With the correct `R_s = 2·alpha·Rbeam` the conventional scan
+misses a great deal, and the pattern is instructive:
+
+* **`alpha = 1` (tangent) fails badly — 40–80 %.** The missed points sit in the
+  DENSE CENTRE of the cloud (`acq_alpha_snapshot.png`, right): a tangent spiral
+  leaves interstitial gaps everywhere, and near the centre the arms are angularly
+  sparse, so the most probable region is the worst covered. rim > overall
+  throughout (the Archimedean spiral under-samples its own centre).
+* **`alpha = 1/sqrt(2)` is near-complete only in a sweet spot (~10–20").** It
+  fails at both ends for different reasons: the **fine beam** (5") reaches only
+  ~64 % of the RIM — too slow to sweep out to the tips within the pass (the
+  kinematic/time limit of Stages 2–4); the **coarse beam** (100–200") drops to
+  ~84 % overall because the discrete dwell points get sparse near the centre.
+* The dense-centre / sparse-arm effect means the **overall** rate can sit *below*
+  the **rim** rate — opposite to the naive expectation.
+
+Caveat (model choice): acquisition is tested at discrete dwell points. A truly
+continuous sweep would close the along-path and centre gaps for
+`alpha = 1/sqrt(2)` (whose radial pitch already overlaps), so the coarse-beam
+drop is partly a dwell-point artifact; the `alpha = 1` radial gaps and the
+fine-beam rim-timing losses are real either way.
+
 ## Stage 5 — control: FOU frozen onto the trajectory (motion vs size)
 
 `main_points_acq_fixed_test.m` isolates the cause of the Stage-4 failure. It

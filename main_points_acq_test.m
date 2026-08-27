@@ -1,25 +1,28 @@
 %==========================================================================
 % main_points_acq_test.m
 %
-%   Monte-Carlo acquisition test with MOVING candidate points.
+%   Monte-Carlo acquisition test with MOVING candidate points, using the
+%   constant-linear-velocity Archimedean-spiral scan-point allocation:
 %
-%   Instead of an analytic FOU, draw N (>=3000) candidate points from the
-%   in-track-elongated orbit covariance. Each candidate is a fixed RIC offset
-%   (a hypothesis about the true orbit); propagated through ECI->ENU it traces
-%   its own moving path on the sky, so the whole cloud translates, rotates and
-%   breathes (1/range) along the pass -- exactly the analytic FOU, but sampled.
+%       r(theta) = theta * R_s/(2*pi),   R_s = 2*alpha*Rbeam,
+%       theta_k  = sqrt(4*pi*k)      =>   r_k = R_s*sqrt(k/pi),
 %
-%   Above a detectable elevation the gimbal scans the mean path with an
-%   OVERLAPPING Archimedean spiral (points at theta_k = sqrt(4*pi*k),
-%   r_k = p*sqrt(k/pi), pitch p = alpha*Rbeam, alpha<2 => overlap). Each
-%   candidate is "acquired" the first time a scan point lands within Rbeam of
-%   the candidate's CURRENT position at that point's visit time.
+%   so one turn advances r by exactly R_s and the along-arc point spacing is
+%   R_s. alpha is the overlap factor:
+%       alpha = 1/sqrt(2)  -> R_s = sqrt(2)*Rbeam : full (overlapping) coverage
+%       alpha = 1          -> R_s = 2*Rbeam       : footprints tangent (gaps)
 %
-%   Purpose: show that because the FOU MOVES while the spiral scans, some
-%   candidates are never coincident with the beam and the scan can FAIL
-%   (acquisition rate < 100%), especially for fine beams / high elevations.
+%   N candidate points are drawn from the in-track covariance; each is a fixed
+%   RIC offset propagated through ECI->ENU, so the cloud reproduces the moving
+%   analytic FOU. A candidate is acquired the first time a scan point lands
+%   within Rbeam of its CURRENT position at that point's visit time.
 %
-%   Depends on the Stage-1..3 pipeline + spiralAcqSim.m + eciToAzElVec.m.
+%   This run: N = 40000, both alpha values, all beam widths, 3 satellites.
+%   Reports the overall acquisition rate AND the rim acquisition rate (the
+%   outer 10% of the cloud by culmination radius) -- the rim is where the
+%   Gaussian tail lives and where the overall metric hides the misses.
+%
+%   Depends on the Stage-1..4 pipeline + spiralAcqSim.m + eciToAzElVec.m.
 %==========================================================================
 clear; clc; close all;
 if exist('OCTAVE_VERSION','builtin'), try, graphics_toolkit('gnuplot'); catch, end; end
@@ -29,20 +32,19 @@ try, rng(rng_seed); catch, rand('seed',rng_seed); randn('seed',rng_seed); end
 %% ----------------------------- CONFIG ----------------------------------
 station.latDeg = 36.3711; station.lonDeg = 127.3617; station.altKm = 0.10;
 station.rEcef  = geodetic2ecef(station.latDeg, station.lonDeg, station.altKm);
-
 sigmaRIC.R = 0.205; sigmaRIC.I = 0.808; sigmaRIC.C = 0.168;   % RIC 1-sigma [km]
 
-passOpt.searchHours = 12; passOpt.coarseDtSec = 15; passOpt.fineDtSec = 1; passOpt.maskDeg = 10;
-projOpt.nSigma = 3; projOpt.sigmaIsoRad = 0; projOpt.nEllipse = 20;
+passOpt.searchHours = 12; passOpt.coarseDtSec = 15; passOpt.fineDtSec = 2; passOpt.maskDeg = 10;
+projOpt.nSigma = 3; projOpt.sigmaIsoRad = 0; projOpt.nEllipse = 12;
 
-detElevDeg = 20;              % detectable elevation: scan only above this
-Npts       = 3000;           % number of covariance sample points
-alpha      = 1.0;            % spiral overlap/spacing factor (pitch = alpha*Rbeam)
+detElevDeg = 20;
+Npts       = 40000;
+alphaList  = [1/sqrt(2), 1.0];        % overlap factor (R_s = 2*alpha*Rbeam)
+rimFrac    = 0.10;                     % outer fraction defining the "rim"
 
 hw.Vaz = 20; hw.Vel = 10; hw.Aaz = 5; hw.Ael = 2; hw.PRF = 2000;
-
-beamList = [5 10 20 50 100 200];    % beam width [arcsec]
-FOCUS = 1; FOCUS_BEAM = 10;         % satellite / beam for detail plots
+beamList = [5 10 20 50 100 200];
+FOCUS = 1; FOCUS_BEAM = 10;
 OUTDIR = 'figures'; if ~exist(OUTDIR,'dir'), mkdir(OUTDIR); end
 
 sats = {
@@ -56,111 +58,115 @@ sats = {
   '1 11129U 78109B   26238.92695670  .00000001  00000-0  10847-3 0  9998', ...
   '2 11129  74.0149  56.5202 0049285  42.3140  28.8688 12.53730015184182';
 };
-nSat = size(sats,1);
+nSat = size(sats,1); nB = numel(beamList); nA = numel(alphaList);
 as = pi/180/3600;
 
 %% --------------------------- RUN ---------------------------------------
-fprintf('\n=== Points acquisition test | N=%d, detElev=%g deg, alpha=%.2f, PRF=%d ===\n', ...
-        Npts, detElevDeg, alpha, hw.PRF);
+fprintf('\n=== Points acquisition | N=%d, detElev=%g, PRF=%d, alpha={%.3f,%.3f} ===\n', ...
+        Npts, detElevDeg, hw.PRF, alphaList(1), alphaList(2));
 
-% covariance sample offsets in RIC [km], shared across satellites
 L  = chol(diag([sigmaRIC.R^2, sigmaRIC.I^2, sigmaRIC.C^2]), 'lower');
-dR = (L * randn(3, Npts))';               % Npts x 3
+dR = (L * randn(3, Npts))';                 % Npts x 3
 
-Rall = cell(nSat,1);
+acqAll = nan(nSat,nB,nA); rimAll = nan(nSat,nB,nA);
+names  = cell(nSat,1);  focusSnap = {};
 for s = 1:nSat
+    names{s} = sats{s,1};
     cfgBase.mode='tle'; cfgBase.tle = parseTLE(sats{s,2}, sats{s,3});
     pass = findBestPass(cfgBase, station, passOpt);
     cfg = cfgBase; cfg.tSec = pass.tSec; trk = generateTrack(cfg);
     cov = generateCovariance(trk, sigmaRIC);
     fou = projectFoU(cov.SigmaEci, trk.rEci, trk.jd, station, projOpt);
 
-    % detectable window (contiguous block above detElevDeg)
-    win = find(fou.altDeg >= detElevDeg);
-    i0 = win(1); i1 = win(end);
-    idx = i0:i1;  M = numel(idx);
-    tGrid  = trk.tSec(idx);
-    meanAz = deg2rad(fou.azDeg(idx));
-    meanEl = deg2rad(fou.altDeg(idx));
-    [~, ipkW] = max(meanEl);
+    win = find(fou.altDeg >= detElevDeg); i0 = win(1); i1 = win(end);
+    idx = i0:i1; M = numel(idx);
+    tGrid  = trk.tSec(idx); meanEl = deg2rad(fou.altDeg(idx)); meanAz = deg2rad(fou.azDeg(idx));
+    [~, ipk] = max(meanEl);
 
-    % candidate local offsets on the window grid
-    dCross = zeros(Npts, M); dEl = zeros(Npts, M); rho = zeros(Npts, M);
+    dCross = zeros(Npts,M,'single'); dEl = zeros(Npts,M,'single');
     for jj = 1:M
         m = idx(jj);
-        Q = [cov.Rhat(:,m), cov.Ihat(:,m), cov.Chat(:,m)];   % RIC->ECI
-        candEci = trk.rEci(:,m) + Q * dR.';                  % 3 x N
+        Q = [cov.Rhat(:,m), cov.Ihat(:,m), cov.Chat(:,m)];
+        candEci = trk.rEci(:,m) + Q*dR.';
         [caz, cel] = eciToAzElVec(candEci, gmstRad(trk.jd(m)), station);
-        dA = mod(caz - meanAz(jj) + pi, 2*pi) - pi;          % wrapped az diff
-        dCross(:,jj) = (dA .* cos(meanEl(jj))).';
-        dEl(:,jj)    = (cel - meanEl(jj)).';
+        dA = mod(caz - meanAz(jj) + pi, 2*pi) - pi;
+        dCross(:,jj) = single((dA .* cos(meanEl(jj))).');
+        dEl(:,jj)    = single((cel - meanEl(jj)).');
     end
     rho = sqrt(dCross.^2 + dEl.^2);
-    RmaxCover = 1.15 * max(rho(:));
+    RmaxCover = 1.15 * double(max(rho(:)));
 
-    S = struct('name',sats{s,1},'tGrid',tGrid,'meanEl',meanEl,'ipk',ipkW, ...
-               'dCross',dCross,'dEl',dEl,'rho',rho,'a',fou.aRad(idx));
-    S.acqRate = zeros(1,numel(beamList)); S.Kpts = zeros(1,numel(beamList));
-    S.reached = false(1,numel(beamList)); S.sims = cell(1,numel(beamList));
+    % rim = outer rimFrac by culmination radius
+    rc = double(rho(:,ipk)); rcs = sort(rc);
+    thr = rcs(max(1, ceil((1-rimFrac)*numel(rcs)))); rimIdx = find(rc >= thr);
 
-    fprintf('\n%-16s  scan window %.1f min (elev %.0f->%.0f->%.0f deg), FOU a max %.0f urad\n', ...
-        sats{s,1}, (tGrid(end)-tGrid(1))/60, rad2deg(meanEl(1)), rad2deg(meanEl(ipkW)), ...
-        rad2deg(meanEl(end)), max(fou.aRad(idx))*1e6);
-    fprintf('   %6s %8s %10s %9s  %s\n', 'beam"','ds"','acq rate','K pts','spiral reached FOU edge?');
-    for bi = 1:numel(beamList)
+    fprintf('\n%-16s window %.1f min (elev %.0f->%.0f->%.0f), a_max %.0f urad, N_rim=%d\n', ...
+        sats{s,1}, (tGrid(end)-tGrid(1))/60, rad2deg(meanEl(1)), rad2deg(meanEl(ipk)), ...
+        rad2deg(meanEl(end)), max(fou.aRad(idx))*1e6, numel(rimIdx));
+    fprintf('   %6s | %-20s | %-20s\n','beam"', ...
+        sprintf('alpha=%.3f (Rs=%.2fx)',alphaList(1),2*alphaList(1)), ...
+        sprintf('alpha=%.3f (Rs=%.2fx)',alphaList(2),2*alphaList(2)));
+    fprintf('   %6s | %9s %9s | %9s %9s\n','','acq','rim','acq','rim');
+    for bi = 1:nB
         Rbeam = 0.5*beamList(bi)*as;
-        sim = spiralAcqSim(tGrid, meanEl, dCross, dEl, rho, Rbeam, alpha, hw, RmaxCover);
-        S.acqRate(bi) = sim.acqRate; S.Kpts(bi) = sim.Kpts; S.reached(bi) = sim.reached;
-        S.sims{bi} = sim;
-        fprintf('   %6d %8.1f %9.1f%% %9d  %s\n', beamList(bi), alpha*beamList(bi), ...
-            100*sim.acqRate, sim.Kpts, ternary(sim.reached,'yes','NO (ran out of pass)'));
+        for ai = 1:nA
+            sim = spiralAcqSim(tGrid, meanEl, dCross, dEl, rho, Rbeam, alphaList(ai), hw, RmaxCover);
+            acqAll(s,bi,ai) = sim.acqRate;
+            rimAll(s,bi,ai) = mean(sim.acquired(rimIdx));
+            if s==FOCUS && beamList(bi)==FOCUS_BEAM
+                focusSnap{ai} = struct('acq',sim.acquired,'sx',sim.sx,'sy',sim.sy, ...
+                    'dCrossPk',double(dCross(:,ipk)),'dElPk',double(dEl(:,ipk)), ...
+                    'alpha',alphaList(ai),'acqRate',sim.acqRate);
+            end
+        end
+        fprintf('   %6d | %8.1f%% %8.1f%% | %8.1f%% %8.1f%%\n', beamList(bi), ...
+            100*acqAll(s,bi,1), 100*rimAll(s,bi,1), 100*acqAll(s,bi,2), 100*rimAll(s,bi,2));
     end
-    Rall{s} = S;
 end
 
 %% --------------------------- PLOTS -------------------------------------
-% (1) acquisition rate vs beam width
-fig = figure('Position',[80 80 760 560],'Color','w','Visible','off');
-hold on; grid on; box on; cols = lines(nSat);
+mk = {'-o','-s'}; acol = {[0.20 0.45 0.85],[0.85 0.25 0.10]};
+alab = arrayfun(@(a) sprintf('alpha=%.3f',a), alphaList, 'UniformOutput',false);
+
+% (1) overall + rim acquisition vs beam, per satellite (2 rows x 3 cols)
+fig = figure('Position',[60 60 1280 720],'Color','w','Visible','off');
 for s = 1:nSat
-    plot(beamList, 100*Rall{s}.acqRate, '-o', 'Color',cols(s,:), 'LineWidth',1.8, 'MarkerFaceColor',cols(s,:));
+    subplot(2,nSat,s); hold on; grid on; box on;
+    for ai = 1:nA
+        plot(beamList, 100*squeeze(acqAll(s,:,ai)), mk{ai}, 'Color',acol{ai}, ...
+             'LineWidth',1.8,'MarkerFaceColor',acol{ai});
+    end
+    set(gca,'XScale','log'); ylim([0 103]);
+    title(sprintf('%s: overall acq', names{s})); xlabel('beam width [arcsec]'); ylabel('acq [%]');
+    if s==1, legend(alab,'Location','southeast'); legend boxoff; end
+
+    subplot(2,nSat,nSat+s); hold on; grid on; box on;
+    for ai = 1:nA
+        plot(beamList, 100*squeeze(rimAll(s,:,ai)), mk{ai}, 'Color',acol{ai}, ...
+             'LineWidth',1.8,'MarkerFaceColor',acol{ai});
+    end
+    set(gca,'XScale','log'); ylim([0 103]);
+    title(sprintf('%s: rim acq (outer %.0f%%)', names{s}, 100*rimFrac));
+    xlabel('beam width [arcsec]'); ylabel('rim acq [%]');
 end
-set(gca,'XScale','log'); ylim([0 105]);
-xlabel('beam width [arcsec]'); ylabel('acquisition success rate [%]');
-title(sprintf('Acquisition of %d moving points vs beam width (detElev %g deg)', Npts, detElevDeg));
-legend(cellfun(@(r) r.name, Rall,'UniformOutput',false),'Location','southeast'); legend boxoff;
-print(fig, fullfile(OUTDIR,'acq_rate_vs_beam.png'), '-dpng','-r120'); close(fig);
+print(fig, fullfile(OUTDIR,'acq_alpha_vs_beam.png'), '-dpng','-r110'); close(fig);
 
-% (2) sky-plane snapshot at culmination: acquired vs missed + scan points
-S = Rall{FOCUS}; bi = find(beamList==FOCUS_BEAM,1); sim = S.sims{bi}; urad = 1e6; ipk = S.ipk;
-fig = figure('Position',[80 80 720 680],'Color','w','Visible','off');
-hold on; grid on; box on; axis equal;
-plot(sim.sx*urad, sim.sy*urad, '.', 'Color',[0.7 0.7 0.7], 'MarkerSize',3);
-mi = ~sim.acquired; ac = sim.acquired;
-plot(S.dCross(ac,ipk)*urad, S.dEl(ac,ipk)*urad, '.', 'Color',[0.20 0.55 0.25], 'MarkerSize',5);
-plot(S.dCross(mi,ipk)*urad, S.dEl(mi,ipk)*urad, '.', 'Color',[0.85 0.15 0.10], 'MarkerSize',6);
-xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
-title(sprintf('%s, %d arcsec: candidates at culmination (acq %.1f%%)', S.name, FOCUS_BEAM, 100*sim.acqRate));
-legend({'scan points','acquired','missed'},'Location','southoutside','Orientation','horizontal'); legend boxoff;
-print(fig, fullfile(OUTDIR,'acq_sky_snapshot.png'), '-dpng','-r120'); close(fig);
-
-% (3) cumulative acquisition vs time, focus satellite, several beams
-fig = figure('Position',[80 80 780 560],'Color','w','Visible','off');
-hold on; grid on; box on; cmap = jet(numel(beamList)); labs = {};
-trel = S.tGrid - S.tGrid(1); tcul = trel(ipk);
-for bi = 1:numel(beamList)
-    th = sort(S.sims{bi}.tHit(~isnan(S.sims{bi}.tHit)));
-    if isempty(th), continue; end
-    frac = 100*(1:numel(th))/Npts;
-    stairs([0; th(:)], [0; frac(:)], '-', 'Color',cmap(bi,:), 'LineWidth',1.5);
-    labs{end+1} = sprintf('%d arcsec (%.0f%%)', beamList(bi), 100*S.acqRate(bi)); %#ok<AGROW>
+% (2) sky snapshot at culmination for the focus case, both alphas
+if numel(focusSnap) == nA
+    urad = 1e6;
+    fig = figure('Position',[60 60 1200 560],'Color','w','Visible','off');
+    for ai = 1:nA
+        S = focusSnap{ai};
+        subplot(1,nA,ai); hold on; grid on; box on; axis equal;
+        plot(S.sx*urad, S.sy*urad, '.', 'Color',[0.75 0.75 0.75], 'MarkerSize',2);
+        ac = S.acq; mi = ~S.acq;
+        plot(S.dCrossPk(ac)*urad, S.dElPk(ac)*urad, '.', 'Color',[0.20 0.55 0.25],'MarkerSize',3);
+        plot(S.dCrossPk(mi)*urad, S.dElPk(mi)*urad, '.', 'Color',[0.85 0.15 0.10],'MarkerSize',4);
+        xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+        title(sprintf('%s  %d arcsec  alpha=%.3f  acq %.1f%%', names{FOCUS}, FOCUS_BEAM, S.alpha, 100*S.acqRate));
+    end
+    print(fig, fullfile(OUTDIR,'acq_alpha_snapshot.png'), '-dpng','-r110'); close(fig);
 end
-yl = ylim; plot(tcul*[1 1], [0 105], ':', 'Color',[0.4 0.4 0.4]);
-text(tcul, 5, ' culmination','Color',[0.4 0.4 0.4]);
-xlabel('time since scan start [s]'); ylabel('cumulative acquired [%]'); ylim([0 105]);
-title(sprintf('%s: when candidates are acquired', S.name));
-legend(labs,'Location','southeast'); legend boxoff;
-print(fig, fullfile(OUTDIR,'acq_cumulative.png'), '-dpng','-r120'); close(fig);
 
-fprintf('\nFigures: acq_rate_vs_beam.png, acq_sky_snapshot.png, acq_cumulative.png\n');
+fprintf('\nFigures: figures/acq_alpha_vs_beam.png, figures/acq_alpha_snapshot.png\n');
 fprintf('Done.\n');
