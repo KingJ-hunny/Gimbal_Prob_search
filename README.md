@@ -267,6 +267,47 @@ Run it:
 main_points_acq_test        % prints acquisition tables, writes figures/acq_*.png
 ```
 
+## Stage 5 — control: FOU frozen onto the trajectory (motion vs size)
+
+`main_points_acq_fixed_test.m` isolates the cause of the Stage-4 failure. It
+freezes the FOU rigidly onto the mean trajectory — every candidate keeps a
+**constant** angular offset from the mean pointing (no 1/range breathing, no
+rotation, no differential motion), the cloud only translating with the mean —
+and runs the same overlapping spiral. Two freeze sizes bracket it: at the small
+scan-start projection and at the large culmination projection.
+
+Result (Starlink 35978, N=3000, detElev 20°, α=1):
+
+```
+ beam   moving   fixed@culm   fixed@start
+  5"    92.8%      92.0%        100.0%
+ 10"    99.2%      99.5%        100.0%
+ >=20"  100%       100%         100%
+```
+
+The finding refines Stage 4: **the failure is a size-vs-scan-budget effect, not
+the motion itself.**
+
+* Freeze the FOU at its **small** start size → **100 % at every beam**: a compact
+  static FOU is fully covered even by the 5″ beam.
+* Freeze it at its **large** culmination size → **~92 % at 5″**, essentially
+  identical to the moving case. A large region simply cannot be swept by a fine
+  beam within the pass, whether it moves or not.
+* Moving vs fixed@culmination differ by <1 pp (moving is even marginally better,
+  because early on the real FOU is compact and the spiral catches some tips while
+  they are close in).
+
+So what breaks the fine-beam scan is that the FOU **grows** toward zenith (1/range)
+until it exceeds the beam's coverage budget — the rigid translation of the cloud
+is almost irrelevant. This points the fix at the coverage budget (coarser beam,
+overlap, or a size-adaptive scan), not merely at "tracking the motion."
+
+Run it:
+
+```matlab
+main_points_acq_fixed_test
+```
+
 ## Where this sits in the larger problem
 
 The projected FOU here is exactly the **moving, rotating, elongated uncertainty
