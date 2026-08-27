@@ -111,6 +111,55 @@ Three effects, all visible in `figures/`:
 
 ---
 
+## Stage 2 — conventional Archimedean-spiral scan time
+
+`scanArchimedeanSpiral.m` + `main_conventional_scan.m` answer: **using the
+conventional method (a circular Archimedean spiral centred on the mean
+trajectory), how long does it take to scan the whole FOU** under the real
+gimbal limits?
+
+Hardware (editable in the main): gimbal `Vaz=20`, `Vel=10` deg/s, `Aaz≥5`,
+`Ael≥2` deg/s²; pulse rate `PRF=2 kHz`; beam width selectable from
+`{5,10,20,50,100,200}` arcsec.
+
+Model: the spiral reaches `r = a` (FOU semi-major, so the whole ellipse is
+enclosed); arm pitch = along-arm pulse spacing `Δs = beamwidth·(1−α)`. The
+completion time is a **time-optimal traversal of the fixed spiral path** under
+three limits — PRF no-gap (`v_sky ≤ Δs·PRF`), gimbal rate, and gimbal
+acceleration — with the azimuth axis stretched by `1/cos(el)` near zenith
+(keyhole). Evaluated at culmination (largest FOU = worst case) and swept along
+the pass.
+
+Headline results (at culmination, α = 0):
+
+```
+                a[urad]  pass[s]   5"     10"    20"    50"   100"   200"   binding
+Starlink 35978    4962     480    541*   271    135     54     27     13    az accel (keyhole)
+Starlink 31742    4940     468    444    222    111     44     22     11    az accel (keyhole)
+COSMOS 1052       1645    1068     88     44     22      9      4      2     az accel (keyhole)
+   (* 5" beam on Starlink 35978 exceeds its own pass duration -> cannot finish in one pass)
+```
+
+Three findings, all in `figures/scan_*`:
+
+* **Scan time ∝ 1/beamwidth²** (finer beam ⇒ tighter arms *and* a lower
+  PRF-limited speed): a 5″ beam is ~40× slower than 200″.
+* **The azimuth keyhole dominates near zenith.** For every case the binding
+  constraint is azimuth acceleration: at el≈84° the az axis is stretched ×9.6,
+  so the effective on-sky az accel is only `Aaz·cos(el) ≈ 0.5 deg/s²`, and the
+  spiral's twice-per-turn az reversals throttle the whole scan (`T_full` is
+  ~10× the velocity/PRF-only bound). Scan time climbs steeply with elevation.
+* **The circular spiral massively over-scans the thin ellipse** (see
+  `scan_spiral_demo.png`): a disk of radius `a` for an FOU whose minor axis is
+  `k≈0.2` of that — the exact inefficiency the elliptical-FOU scan patterns
+  (Kim et al.) were designed to remove, and the motivation for the smart method.
+
+Run it:
+
+```matlab
+main_conventional_scan      % prints the tables, writes figures/scan_*.png
+```
+
 ## Where this sits in the larger problem
 
 The projected FOU here is exactly the **moving, rotating, elongated uncertainty
