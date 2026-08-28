@@ -371,6 +371,44 @@ Starlink 35978 coverage %      100Hz  500Hz  1kHz  2kHz  3kHz
 * At the operating 2 kHz we are already in the saturated regime; raising PRF
   further buys nothing, and the coarse-beam loss is fundamental to the spacing.
 
+## Stage 4d — low vs high culmination (is it the high elevation?)
+
+`main_low_elev_test.m` tests whether the near-zenith culmination is what causes
+the fine-beam misses, by comparing two passes over Korea under identical settings
+(α = 1/sqrt(2), PRF = 2 kHz, N = 40000, uniform + Gaussian):
+
+* a **synthetic LEO tuned to culminate ~40°** — same Starlink-like `a, i` (so the
+  FOU physics is identical), only the geometry differs. Found by tuning RAAN:
+  `a = 6861.2 km, e = 0.001, i = 43°, RAAN = 284.5°, argp = 0, M0 = 0` →
+  best pass peaks **40.7°** (range 724 km, a_max 3350 µrad, keyhole 1/cos = 1.3);
+* **Starlink 35978** — best pass peaks **83.9°** (range 488 km, a_max 4962 µrad,
+  keyhole 1/cos = 9.5).
+
+The result depends on where the scan *starts* (`low_vs_high_elev.png`):
+
+```
+uniform coverage %      start elev 10 deg        start elev 20 deg
+  beam"               40 deg    84 deg          40 deg    84 deg
+    5                 100.0     100.0            94.8      87.4
+   10                  99.9      99.9           100.0     100.0
+  200                  85.4      82.8            93.8      91.7
+```
+
+* **Start at first visibility (10°):** the 40° and 84° curves nearly coincide —
+  the near-zenith keyhole does **not** cause a fine-beam failure, because the
+  spiral sweeps the compact low-elevation FOU and catches almost everything
+  before reaching the keyhole region.
+* **Start higher (20°):** now the high pass IS worse at the finest beam — 5″
+  drops to **87.4 %** at 84° vs **94.8 %** at 40° — the near-zenith keyhole plus
+  the larger 1/range FOU cost ~7 pp. So the "high-elevation 찐빠" is real, but
+  only when you cannot use the early low-elevation window.
+* **Coarse beams (200″)** are roughly elevation-independent (both ~83–94 %): that
+  loss is the discrete-dwell spatial gap, not the elevation.
+
+Bottom line: the high culmination hurts the finest beam **only if the scan starts
+high**; starting at first visibility removes it. The coarse-beam gap is not an
+elevation effect at all.
+
 ## Stage 5 — control: FOU frozen onto the trajectory (motion vs size)
 
 `main_points_acq_fixed_test.m` isolates the cause of the Stage-4 failure. It
