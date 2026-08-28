@@ -317,6 +317,60 @@ continuous sweep would close the along-path and centre gaps for
 drop is partly a dwell-point artifact; the `alpha = 1` radial gaps and the
 fine-beam rim-timing losses are real either way.
 
+## Stage 4c — uniform coverage, detectable elevation, and PRF
+
+Two additions to the point-acquisition study.
+
+**Uniform distribution (coverage measure).** `main_points_acq_test.m` now also
+draws the N = 40000 points **uniformly inside the 3σ RIC ellipsoid** alongside
+the Gaussian set. With equal weight per hypothesis the acquisition rate is the
+**covered fraction of the 3σ region** — a pure coverage measure with none of the
+Gaussian centre-weighting. It also sweeps the **detectable elevation** at which
+the scan starts (10° and 20°). `acq_dist_det_vs_beam.png`: rows = gaussian /
+uniform, colour = α, line style = detElev.
+
+```
+Starlink 35978, alpha = 1/sqrt(2)      gaussian            uniform (coverage)
+   beam"                              det10   det20       det10   det20
+     5                               100.0%   95.9%      100.0%   87.4%
+    10                                99.8%   99.8%       99.9%  100.0%
+    50                                96.2%   98.3%       98.7%   99.4%
+   200                                79.6%   84.3%       82.8%   91.7%
+```
+
+* **Uniform reads lower than Gaussian at the edges** (e.g. 5", det20: 95.9 % vs
+  87.4 %) — the coverage measure exposes the unswept rim that the probability
+  weight hides.
+* **A lower detectable elevation helps the fine beams**: starting at 10° gives
+  the spiral more low-elevation time to sweep the compact FOU before it balloons,
+  so 5" rises from 87 % (det20) to 100 % (det10). Coarse beams, limited by
+  spatial gaps rather than time, barely move with detElev.
+
+**Beam width vs PRF (`main_beam_frequency_test.m`).** With α = 1/sqrt(2) fixed,
+one detectable elevation, and the uniform cloud, it sweeps PRF ∈ {100, 500,
+1000, 2000, 3000} Hz across beam widths to explain *why* the error grows with
+beam width. PRF enters only through the speed cap `v ≤ R_s·PRF` (one pulse per
+point spacing), so it changes scan *speed*, not spatial spacing. The result
+decomposes the beam-width error into two regimes (`beam_freq_coverage.png`,
+`beam_freq_vs_prf.png`):
+
+```
+Starlink 35978 coverage %      100Hz  500Hz  1kHz  2kHz  3kHz
+   5"   (fine)                  61.0   87.2  87.4  87.4  87.4   PRF-sensitive, then saturates
+  10"                           93.5  100.0 100.0 100.0 100.0
+  20"+  (coarse)               ~const across PRF (99.9 / 99.4 / 97.8 / 91.7)
+```
+
+* **Fine beams are time-limited** — the spiral is slow and needs a high pulse
+  rate; coverage climbs steeply from 100→500 Hz, then **saturates** (at 5″ it
+  plateaus at ~87 %, now capped by the gimbal velocity/acceleration keyhole, not
+  PRF).
+* **Coarse beams are spatially limited** — every PRF curve lands on the same
+  point; the drop toward 200″ is the discrete-dwell interstitial gap, which no
+  amount of PRF fixes.
+* At the operating 2 kHz we are already in the saturated regime; raising PRF
+  further buys nothing, and the coarse-beam loss is fundamental to the spacing.
+
 ## Stage 5 — control: FOU frozen onto the trajectory (motion vs size)
 
 `main_points_acq_fixed_test.m` isolates the cause of the Stage-4 failure. It
