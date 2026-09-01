@@ -409,6 +409,52 @@ Bottom line: the high culmination hurts the finest beam **only if the scan start
 high**; starting at first visibility removes it. The coarse-beam gap is not an
 elevation effect at all.
 
+## Stage 6 — conventional spiral, control-frequency sweep, harvest probability
+
+`main_sept_spiral_test.m` (+ `buildSpiralPoints.m`, `harvestScan.m`,
+`precomputeOffsets.m`) is a particle-based conceptual study of a **conventional
+Archimedean spiral with overlap = 1** (`alpha = 1`, `R_s = 2·Rbeam`, footprints
+exactly tangent → interstitial gaps remain). The spiral is drawn for the
+**largest (zenith) FOU** out to its major axis (K points). Scan point k is
+visited at `t_k = t_start + (k-1)/f` — pure **beam-control-frequency** timing,
+no gimbal dynamics — and f is swept over {100, 250, 500, 1000, 2000} Hz.
+Harvest = fraction of N = 40000 Gaussian particles covered.
+
+Starlink 35978, beam 50″, peak 83.9°, `a_zenith = 4962 µrad`, `R_s = 242 µrad`,
+`K = 1316`:
+
+```
+(A) STATIONARY (frozen zenith FOU):  harvest = 77.7%  (frequency-independent)
+    scan time K/f:  100Hz->13.2s  250->5.3  500->2.6  1k->1.3  2k->0.66s
+
+(B) ORBITING (same scan time K/f, spiral tracks the mean orbit):
+     f[Hz]   harvest@10deg   harvest@zenith
+     100         64.9%          77.7%
+     ...          (flat)         (flat)
+     2000        64.9%          77.8%
+```
+
+Findings:
+
+* **The conventional overlap-1 spiral misses ~22% even on a FIXED FOU** (77.7%):
+  the tangent spacing leaves interstitial gaps, plus a few % of Gaussian mass
+  lies beyond the 3σ major axis the spiral stops at.
+* **Scan time = K/f exactly** (0.66–13 s), so a higher control frequency only
+  makes the same scan faster — it does not change the stationary harvest.
+* **Harvest is essentially frequency-independent, and start-at-zenith ≈
+  stationary** — with control-frequency timing even the slowest scan (13 s) is
+  fast compared with how quickly the FOU evolves (~minutes), so the FOU's motion
+  over one scan is negligible (its rotation near zenith even helps slightly, by
+  letting particles drift out of the fixed gaps).
+* **Start-at-10° is lower (64.9%)**, but this is a *size-mismatch*, not a motion
+  effect: the small low-elevation FOU sits in the sparse inner turns of the
+  zenith-sized spiral (where the α=1 gaps are widest), so it is harvested worse.
+
+Caveat: because timing here is `t_k = k/f` (the requested control-frequency
+model), the beam is assumed to slew as fast as f demands, ignoring the gimbal
+vmax/amax. Under the *real* kinematic scan speed the scan would take 10–100×
+longer and the FOU motion WOULD bite — that is the regime of Stages 3–4.
+
 ## Stage 5 — control: FOU frozen onto the trajectory (motion vs size)
 
 `main_points_acq_fixed_test.m` isolates the cause of the Stage-4 failure. It
