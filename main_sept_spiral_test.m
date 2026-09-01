@@ -119,5 +119,43 @@ grid on; box on; xlabel('beam control frequency [Hz]'); ylabel('scan-completion 
 title(sprintf('Scan time (K=%d points): time = K/f', K));
 print(fig, fullfile(OUTDIR,'sept_spiral_time.png'), '-dpng','-r120'); close(fig);
 
-fprintf('\nFigures: figures/sept_spiral_harvest.png, figures/sept_spiral_time.png\n');
+% (3) scan-point placement + beam footprints over the STATIONARY FOU
+urad = 1e6; th = linspace(0,2*pi,72);
+[V,D] = eig(fou.SigmaAng(:,:,ipk)); lam = max(diag(D),0);
+ex = projOpt.nSigma*(V(1,1)*sqrt(lam(1))*cos(th) + V(1,2)*sqrt(lam(2))*sin(th));
+ey = projOpt.nSigma*(V(2,1)*sqrt(lam(1))*cos(th) + V(2,2)*sqrt(lam(2))*sin(th));
+Rb_u = Rbeam*urad; cc = cos(th); ss = sin(th);
+ac = harvStat; mi = ~harvStat;
+
+fig = figure('Position',[50 50 1240 580],'Color','w','Visible','off');
+
+% full view: FOU ellipse + all scan points + harvested/missed particles
+subplot(1,2,1); hold on; grid on; box on; axis equal;
+plot(sX(ac)*urad, sY(ac)*urad, '.', 'Color',[0.25 0.60 0.30], 'MarkerSize',2);
+plot(sX(mi)*urad, sY(mi)*urad, '.', 'Color',[0.85 0.15 0.10], 'MarkerSize',3);
+plot(sx*urad, sy*urad, '.', 'Color',[0.15 0.30 0.85], 'MarkerSize',3);
+plot(ex*urad, ey*urad, 'k--', 'LineWidth',2);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('spiral over 3-sigma FOU  (harvest %.1f%%, K=%d)', 100*Hstat, K));
+legend({'harvested','missed','scan points','FOU 3-sigma'}, ...
+       'Location','southoutside','Orientation','horizontal'); legend boxoff;
+
+% zoom: beam footprints (overlap=1) showing tangency + interstitial gaps
+subplot(1,2,2); hold on; grid on; box on; axis equal;
+zl = 1200;                                        % zoom half-width [urad]
+in = find(sqrt(sx.^2+sy.^2)*urad <= zl+Rb_u);
+for q = in
+    fill(sx(q)*urad+Rb_u*cc, sy(q)*urad+Rb_u*ss, [0.55 0.70 1.0], ...
+         'FaceAlpha',0.25, 'EdgeColor',[0.45 0.55 0.9], 'LineWidth',0.3);
+end
+plot(sx(in)*urad, sy(in)*urad, 'k.', 'MarkerSize',4);
+pin = (abs(sX*urad)<=zl) & (abs(sY*urad)<=zl);
+plot(sX(pin & mi)*urad, sY(pin & mi)*urad, '.', 'Color',[0.85 0.10 0.05], 'MarkerSize',6);
+plot(sX(pin & ac)*urad, sY(pin & ac)*urad, '.', 'Color',[0.10 0.45 0.15], 'MarkerSize',3);
+xlim([-zl zl]); ylim([-zl zl]);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('beam footprints (overlap=1, Rbeam=%.0f urad): tangent, gaps -> misses', Rb_u));
+print(fig, fullfile(OUTDIR,'sept_spiral_layout.png'), '-dpng','-r120'); close(fig);
+
+fprintf('\nFigures: figures/sept_spiral_harvest.png, figures/sept_spiral_time.png, sept_spiral_layout.png\n');
 fprintf('Done.\n');
