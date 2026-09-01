@@ -186,6 +186,117 @@ legend({'scanned','unscanned','zenith 3-sigma FOU'}, ...
        'Location','southoutside','Orientation','horizontal'); legend boxoff;
 print(fig, fullfile(OUTDIR,'sept_spiral_orbit_layout.png'), '-dpng','-r120'); close(fig);
 
+%% ------------- FOU at the 4 key epochs (start/end x 2 sub-cases) --------
+% Representative frequency = fList(1) (longest scan Tmax => most motion).
+tEnd1 = t10   + tScan(1);   tEnd2 = tPeak + tScan(1);
+cfgE = cfgBase; cfgE.tSec = [t10, tEnd1, tPeak, tEnd2];
+trkE = generateTrack(cfgE); covE = generateCovariance(trkE, sigmaRIC);
+fouE = projectFoU(covE.SigmaEci, trkE.rEci, trkE.jd, station, projOpt);   % idx 1..4
+
+% (5) REDRAW scanned/unscanned in the SCAN-END frame (each in its own scale)
+jc1 = min(round(tScan(1)/dtFine)+1, numel(t1));    % scan-end column, start@10deg
+jc2 = min(round(tScan(1)/dtFine)+1, numel(t2));    % scan-end column, start@zenith
+e1x=double(o1X(:,jc1)); e1y=double(o1Y(:,jc1));
+e2x=double(o2X(:,jc2)); e2y=double(o2Y(:,jc2));
+[g1x,g1y]=ellipsePts(fouE.SigmaAng(:,:,2),projOpt.nSigma);   % FOU @ scan-end, 10deg
+[g2x,g2y]=ellipsePts(fouE.SigmaAng(:,:,4),projOpt.nSigma);   % FOU @ scan-end, zenith
+a1=max(hypot(g1x,g1y)); a2=max(hypot(g2x,g2y));
+sp1=find(hypot(sx,sy)<=1.2*a1); sp2=find(hypot(sx,sy)<=1.2*a2);
+
+fig=figure('Position',[50 50 1240 600],'Color','w','Visible','off');
+subplot(1,2,1); hold on; grid on; box on; axis equal;
+plot(sx(sp1)*urad, sy(sp1)*urad, '.','Color',[0.70 0.70 0.70],'MarkerSize',5);
+plot(e1x(hO1) *urad, e1y(hO1) *urad, '.','Color',[0.20 0.60 0.30],'MarkerSize',3);
+plot(e1x(~hO1)*urad, e1y(~hO1)*urad, '.','Color',[0.85 0.15 0.10],'MarkerSize',3);
+plot(g1x*urad, g1y*urad, 'k--','LineWidth',1.8);
+L1=1.2*a1*urad; xlim([-L1 L1]); ylim([-L1 L1]);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('start 10 deg, scan end (el=%.1f deg): scanned %.1f%%, %d/%d pts on FOU',...
+      fouE.altDeg(2),100*mean(hO1),numel(sp1),K));
+legend({'scan points','scanned','unscanned','FOU 3-sigma'},...
+       'Location','southoutside','Orientation','horizontal'); legend boxoff;
+
+subplot(1,2,2); hold on; grid on; box on; axis equal;
+plot(sx(sp2)*urad, sy(sp2)*urad, '.','Color',[0.80 0.80 0.80],'MarkerSize',2);
+plot(e2x(hO2) *urad, e2y(hO2) *urad, '.','Color',[0.20 0.60 0.30],'MarkerSize',2);
+plot(e2x(~hO2)*urad, e2y(~hO2)*urad, '.','Color',[0.85 0.15 0.10],'MarkerSize',3);
+plot(g2x*urad, g2y*urad, 'k--','LineWidth',1.8);
+L2=1.2*a2*urad; xlim([-L2 L2]); ylim([-L2 L2]);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('start zenith, scan end (el=%.1f deg): scanned %.1f%%, %d/%d pts on FOU',...
+      fouE.altDeg(4),100*mean(hO2),numel(sp2),K));
+legend({'scan points','scanned','unscanned','FOU 3-sigma'},...
+       'Location','southoutside','Orientation','horizontal'); legend boxoff;
+print(fig, fullfile(OUTDIR,'sept_spiral_orbit_end.png'), '-dpng','-r120'); close(fig);
+
+% (6) az / alt flow during the scan, per control frequency (window = K/f)
+tvA = 0:0.1:Tmax;
+cA=cfgBase; cA.tSec=t10  +tvA; tA=generateTrack(cA); vA=generateCovariance(tA,sigmaRIC);
+fA=projectFoU(vA.SigmaEci,tA.rEci,tA.jd,station,projOpt);
+cZ=cfgBase; cZ.tSec=tPeak+tvA; tZ=generateTrack(cZ); vZ=generateCovariance(tZ,sigmaRIC);
+fZ=projectFoU(vZ.SigmaEci,tZ.rEci,tZ.jd,station,projOpt);
+elA=fA.altDeg; azA=unwrap(fA.azDeg*pi/180)*180/pi;
+elZ=fZ.altDeg; azZ=unwrap(fZ.azDeg*pi/180)*180/pi;
+
+fig=figure('Position',[40 40 1180 800],'Color','w','Visible','off');
+subplot(2,2,1); hold on; grid on; box on;
+plot(tvA,elA,'Color',[0.15 0.35 0.8],'LineWidth',1.9); drawFreqMarks(tvA,elA,tScan,fList);
+xlabel('time since scan start [s]'); ylabel('elevation [deg]');
+title(sprintf('start 10 deg: elevation  (%.1f -> %.1f deg over %.1fs)',elA(1),elA(end),Tmax));
+subplot(2,2,2); hold on; grid on; box on;
+plot(tvA,azA,'Color',[0.15 0.35 0.8],'LineWidth',1.9); drawFreqMarks(tvA,azA,tScan,fList);
+xlabel('time since scan start [s]'); ylabel('azimuth [deg]');
+title(sprintf('start 10 deg: azimuth  (%.1f -> %.1f deg)',azA(1),azA(end)));
+subplot(2,2,3); hold on; grid on; box on;
+plot(tvA,elZ,'Color',[0.8 0.2 0.15],'LineWidth',1.9); drawFreqMarks(tvA,elZ,tScan,fList);
+xlabel('time since scan start [s]'); ylabel('elevation [deg]');
+title(sprintf('start zenith: elevation  (%.1f -> %.1f deg over %.1fs)',elZ(1),elZ(end),Tmax));
+subplot(2,2,4); hold on; grid on; box on;
+plot(tvA,azZ,'Color',[0.8 0.2 0.15],'LineWidth',1.9); drawFreqMarks(tvA,azZ,tScan,fList);
+xlabel('time since scan start [s]'); ylabel('azimuth (unwrapped) [deg]');
+title(sprintf('start zenith: azimuth KEYHOLE  (%.1f -> %.1f deg, swing %.0f deg)',...
+      azZ(1),azZ(end),azZ(end)-azZ(1)));
+print(fig, fullfile(OUTDIR,'sept_spiral_azalt.png'), '-dpng','-r120'); close(fig);
+
+% (7) FOU change start->end, fixed ground-station frame
+EXAG = 8;                                   % ellipse size exaggeration for sky view
+fig=figure('Position',[40 40 1240 560],'Color','w','Visible','off');
+
+% left: absolute sky (az,el) with track + start/end FOU ellipses (x EXAG)
+subplot(1,2,1); hold on; grid on; box on;
+plot(azA, elA, '-','Color',[0.3 0.5 0.95],'LineWidth',1.0);           % 10deg track
+plot(azZ, elZ, '-','Color',[0.95 0.45 0.4],'LineWidth',1.0);         % zenith track
+epAz=[fouE.azDeg(1) fouE.azDeg(2) fouE.azDeg(3) fouE.azDeg(4)+360];  % continue zenith az
+epEl=[fouE.altDeg(1) fouE.altDeg(2) fouE.altDeg(3) fouE.altDeg(4)];
+sty={'-','--','-','--'}; col={[0.15 0.35 0.8],[0.15 0.35 0.8],[0.8 0.2 0.15],[0.8 0.2 0.15]};
+for i=1:4
+    [ox,oy]=ellipsePts(fouE.SigmaAng(:,:,i),projOpt.nSigma);
+    daz=EXAG*(ox./cos(epEl(i)*pi/180))*180/pi; del=EXAG*oy*180/pi;
+    plot(epAz(i)+daz, epEl(i)+del, sty{i},'Color',col{i},'LineWidth',1.6);
+    plot(epAz(i), epEl(i), 'k.','MarkerSize',10);
+end
+xlabel('azimuth [deg]'); ylabel('elevation [deg]');
+title(sprintf('fixed station sky: FOU 3-sigma (x%d) at start(solid)/end(dashed)',EXAG));
+legend({'10deg track','zenith track'},'Location','northwest'); legend boxoff;
+
+% right: TRUE-size ellipses, centred, start(solid)/end(dashed)
+subplot(1,2,2); hold on; grid on; box on; axis equal;
+lbl={}; hh=[];
+grp={2,1,[0.15 0.35 0.8],'10deg';  4,3,[0.8 0.2 0.15],'zenith'};
+for r=1:2
+    ie=grp{r,1}; is=grp{r,2}; c=grp{r,3};
+    [sxx,syy]=ellipsePts(fouE.SigmaAng(:,:,is),projOpt.nSigma);
+    [exx,eyy]=ellipsePts(fouE.SigmaAng(:,:,ie),projOpt.nSigma);
+    h=plot(sxx*urad,syy*urad,'-','Color',c,'LineWidth',1.9); hh(end+1)=h; lbl{end+1}=[grp{r,4} ' start'];
+    h=plot(exx*urad,eyy*urad,'--','Color',c,'LineWidth',1.9); hh(end+1)=h; lbl{end+1}=[grp{r,4} ' end'];
+end
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title('true-size FOU (centred): start vs end');
+legend(hh,lbl,'Location','southoutside','Orientation','horizontal'); legend boxoff;
+print(fig, fullfile(OUTDIR,'sept_spiral_fou_startend.png'), '-dpng','-r120'); close(fig);
+
 fprintf('\nFigures: figures/sept_spiral_harvest.png, figures/sept_spiral_time.png,\n');
-fprintf('         figures/sept_spiral_layout.png, figures/sept_spiral_orbit_layout.png\n');
+fprintf('         figures/sept_spiral_layout.png, figures/sept_spiral_orbit_layout.png,\n');
+fprintf('         figures/sept_spiral_orbit_end.png, figures/sept_spiral_azalt.png,\n');
+fprintf('         figures/sept_spiral_fou_startend.png\n');
 fprintf('Done.\n');
