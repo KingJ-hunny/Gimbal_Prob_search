@@ -157,5 +157,35 @@ xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
 title(sprintf('beam footprints (overlap=1, Rbeam=%.0f urad): tangent, gaps -> misses', Rb_u));
 print(fig, fullfile(OUTDIR,'sept_spiral_layout.png'), '-dpng','-r120'); close(fig);
 
-fprintf('\nFigures: figures/sept_spiral_harvest.png, figures/sept_spiral_time.png, sept_spiral_layout.png\n');
+% (4) ORBITING: scanned vs unscanned particles, plotted in the SAME zenith
+%     projection frame as the stationary case. The effective spiral changes as
+%     the FOU rescales/rotates with elevation, so footprint overlap is not
+%     meaningful here -> only the scanned/unscanned outcome is shown. Each
+%     particle sits at its zenith-frame offset (sX,sY); colour = orbiting result.
+fRep = fList(1);                                             % representative freq (longest scan, most motion)
+hO1 = harvestScan(sx,sy, t10  +(0:K-1)/fRep, o1X,o1Y,t1, Rbeam);   % start @ 10 deg
+hO2 = harvestScan(sx,sy, tPeak+(0:K-1)/fRep, o2X,o2Y,t2, Rbeam);   % start @ zenith
+
+fig = figure('Position',[50 50 1240 600],'Color','w','Visible','off');
+subplot(1,2,1); hold on; grid on; box on; axis equal;
+plot(sX(hO1) *urad, sY(hO1) *urad, '.', 'Color',[0.25 0.60 0.30], 'MarkerSize',2);
+plot(sX(~hO1)*urad, sY(~hO1)*urad, '.', 'Color',[0.85 0.15 0.10], 'MarkerSize',3);
+plot(ex*urad, ey*urad, 'k--', 'LineWidth',1.6);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('orbiting, start @ 10 deg:  scanned %.1f%%  (stationary %.1f%%)', 100*mean(hO1), 100*Hstat));
+legend({'scanned','unscanned','zenith 3-sigma FOU'}, ...
+       'Location','southoutside','Orientation','horizontal'); legend boxoff;
+
+subplot(1,2,2); hold on; grid on; box on; axis equal;
+plot(sX(hO2) *urad, sY(hO2) *urad, '.', 'Color',[0.25 0.60 0.30], 'MarkerSize',2);
+plot(sX(~hO2)*urad, sY(~hO2)*urad, '.', 'Color',[0.85 0.15 0.10], 'MarkerSize',3);
+plot(ex*urad, ey*urad, 'k--', 'LineWidth',1.6);
+xlabel('cross-elevation [urad]'); ylabel('elevation [urad]');
+title(sprintf('orbiting, start @ zenith:  scanned %.1f%%  (stationary %.1f%%)', 100*mean(hO2), 100*Hstat));
+legend({'scanned','unscanned','zenith 3-sigma FOU'}, ...
+       'Location','southoutside','Orientation','horizontal'); legend boxoff;
+print(fig, fullfile(OUTDIR,'sept_spiral_orbit_layout.png'), '-dpng','-r120'); close(fig);
+
+fprintf('\nFigures: figures/sept_spiral_harvest.png, figures/sept_spiral_time.png,\n');
+fprintf('         figures/sept_spiral_layout.png, figures/sept_spiral_orbit_layout.png\n');
 fprintf('Done.\n');
