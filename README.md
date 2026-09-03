@@ -505,3 +505,111 @@ the candidates line up along the sky track, so the scan reduces to a smooth
 lead/lag schedule over that axis plus a thin cross-track dither. Stage 2 will add
 the beam footprint, the PRF, and the gimbal velocity/acceleration limits on top
 of the geometry established here.
+
+---
+
+## Stage 7 — Debris laser-ranging acquisition: CMA-ES serpentine vs conventional spiral
+
+Implementation of the *Debris Laser Ranging Acquisition* spec (written for
+Python/NumPy/`cma`, realised here in MATLAB/Octave). Octave has no `cma`
+package, so Hansen's CMA-ES is implemented directly in `dacq_cmaes.m`; a
+gradient method is not applicable anyway, because the binary detection test
+makes the objective piecewise constant.
+
+```matlab
+main_debris_acq_opt        % LAYER 0, (Q,R) matrix, diagnostics
+main_debris_acq_valsweep   % validation at 2000 points + f_dwell sweep
+```
+
+### Modules
+
+| File | Role |
+|---|---|
+| `dacq_config.m` | every parameter; deviations from the spec documented inline |
+| `dacq_rk4J2.m` | vectorised two-body + J2 RK4, one integrator for cloud and median |
+| `dacq_trackAzEl.m` | topocentric az/el history of the sample cloud |
+| `dacq_findpass.m` | (RAAN, M0) search for the requested pass geometry |
+| `dacq_precompute.m` | LAYER 0: cloud, `Om_max`, centreline, `t_conv` |
+| `dacq_setgrid.m` | path grid + evaluation grid, Lagrange basis |
+| `dacq_spiral.m` | conventional Archimedean baseline under the real limits |
+| `dacq_pattern.m` | 9-parameter serpentine |
+| `dacq_evaluate.m` | chunked binary detection with harvest |
+| `dacq_objective.m` | `J = Q*Jx + R*Ju`, violation-carrying penalty |
+| `dacq_cmaes.m` | (mu/mu_w, lambda)-CMA-ES |
+| `dacq_resample.m` | redraw the cloud while keeping the geometry (validation) |
+
+### Four corrections the spec needed
+
+1. **Unwrap azimuth before any angular metric.** Without it `Om_max` came out
+   as 6 deg instead of 0.19 deg and `nu` was meaningless.
+2. **Size `Om_max` over the scan horizon, not the whole visible arc.** The
+   cloud is "the target at `t +/- dT`", so its sky extent is
+   `dT * (sky angular rate)`, and that rate triples between rise and
+   culmination. Horizon and `Om_max` depend on each other, so it is solved as
+   a short fixed point.
+3. **There is a third bottleneck.** Besides the dwell-spacing cap
+   `2*r_beam*f` and the slew cap `w_max`, a spiral of radius `Om_max` obeys
+   `v <= sqrt(a*R_curv)`. Rounding a 0.19 deg circle at 5 deg/s^2 caps the
+   speed near 1 deg/s, far below the 5.6 deg/s the dwell spacing would allow
+   at 500 Hz. This **centripetal** limit dominates at every frequency tested,
+   and it is what makes the spec's 6 h propagation infeasible: `t_cent` runs
+   to 780 s against a 428 s visible arc, `nu` to ~370, and the fixed point
+   diverges. Following the spec's own tuning rule ("`nu` too large -> reduce
+   `dt_prop`"), `dt_prop` is 2 h here.
+4. **The drift index could only reach half the cloud.** `idx = v*k` sweeps
+   monotonically from the start of the centreline, so the trailing half was
+   unreachable (~50 % ceiling for any `v`). Worse, when the index saturates
+   the drift velocity drops to zero in one sample — an acceleration spike that
+   fails feasibility, silently capping `v` at `N_path/N_max ~ 1.12` when the
+   physics wants ~1.35. The path is now extended by the cloud's along-track
+   span at both ends and made long enough for the largest allowed `v`. This
+   single fix moved the physical starting guesses from 1.4 % coverage to 80 %.
+
+### Scenario (LAYER 0 gates, all passed)
+
+| quantity | value |
+|---|---|
+| pass | peak el 60.5 deg, epoch + 1.88 h, visible arc 426 s |
+| `nu = Om_max/r_beam` | **34.2** (`Om_max` = 684 arcsec) |
+| bottleneck | **centripetal** (dwell 1.8 s, slew 3.0 s, centripetal 16.2 s) |
+| `t_conv` (full traverse) | 16.36 s; spiral reaches the 95 % reference at 9.20 s |
+| anisotropy | `Om_max / mean(Wd)` = 8.1 (`Wd` 80–88 arcsec) |
+
+### Result: the conventional spiral wins on speed
+
+`speedup` compares **like-for-like** — the time each method needs to reach the
+same coverage — not the spiral's full traverse time, which would flatter the
+optimiser.
+
+| (Q,R) | frac_scan | t_reach [s] | speedup | J_x | J_u |
+|---|---|---|---|---|---|
+| baseline spiral | 1.000 | 9.20 | 1.00 | **0.0273** | **0.5907** |
+| (1,1) balanced | 0.933 | 11.4 | 0.81 | 0.135 | **0.077** |
+| (1,0) speed | 0.976 | 10.28 | **0.895** | 0.100 | 0.275 |
+| (0,1) sanity | 0.086 | — | — | 0.915 | **0.0000** |
+
+Validation on 2000 points (same geometry, `dacq_resample`) reproduces it:
+spiral 9.2 s, serpentine 10.8 s, speedup 0.9.
+
+**Why.** `figures/dacq_thist.png` is the diagnostic. The spiral's hit-time
+histogram decays exponentially from `t = 0` (median 1.7 s); the serpentine's is
+a bell centred at ~6 s. The spiral starts at the centre and works outward,
+which is exactly the order of decreasing probability density for a Gaussian
+cloud, so it harvests the mass first. The serpentine sweeps at a roughly
+constant along-track rate, which is order-agnostic: it collects uniformly in
+*position*, hence nothing early. Against a Gaussian the centre-out ordering is
+very hard to beat, and the anisotropy advantage (8:1, so ~13x less area to
+cover) is not enough to make up for it, because the serpentine's tight
+transverse oscillation is itself acceleration-limited to a lower path speed
+than the spiral's gentler outer turns.
+
+**Where the serpentine does win: control effort.** At (1,1) it reaches 93 %
+coverage with `J_u = 0.077` against the spiral's `0.5907` — **7.7x less**
+actuator effort — so the combined objective favours it (0.21 vs 0.62). The
+spiral is centripetal-limited, i.e. it runs at the acceleration limit for its
+whole traverse. If the mount, not the clock, is the scarce resource, the
+optimised serpentine is the better scan; if time-to-detection is what matters,
+the conventional spiral already is near-optimal in this regime.
+
+The `(0,1)` case returns the near-stationary solution (`J_u = 0`, 8.6 %
+coverage), which is the pipeline sanity check the spec asks for.
