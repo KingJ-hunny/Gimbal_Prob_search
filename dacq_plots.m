@@ -116,8 +116,10 @@ function dacq_plots(what, pre, cfg, OUTDIR, extra)
         plot([0 pre.t_max], 100*[pre.frac_ref pre.frac_ref],'k:','LineWidth',1.4);
         xlim([0 pre.t_max]); ylim([0 102]);
         xlabel('time [s]'); ylabel('probability mass harvested [%]');
+        if isfield(extra,'t_reach'), tr_ = extra.t_reach;
+        else, tr_ = dacq_tfrac(extra, pre.frac_ref, pre.t_max); end
         title(sprintf('coverage vs time  (reference %.0f%%: spiral %.2f s, serpentine %s s)', ...
-              100*pre.frac_ref, pre.t_ref, fmtnum(extra.t_reach)));
+              100*pre.frac_ref, pre.t_ref, fmtnum(tr_)));
         legend({'conventional spiral','optimised serpentine','reference coverage'}, ...
                'Location','southeast'); legend boxoff;
         pname = 'dacq_cumulative.png';
@@ -141,8 +143,10 @@ function dacq_plots(what, pre, cfg, OUTDIR, extra)
         SW = extra;
         subplot(1,2,1); hold on; grid on; box on;
         plot(SW.f, SW.sp, '-o','Color',[0.85 0.25 0.1],'LineWidth',2,'MarkerFaceColor',[0.85 0.25 0.1]);
-        plot(SW.f, SW.spq(1,:), ':','Color',[0.85 0.25 0.1]);
-        plot(SW.f, SW.spq(2,:), ':','Color',[0.85 0.25 0.1]);
+        if all(isfinite(SW.spq(:)))
+            plot(SW.f, SW.spq(1,:), ':','Color',[0.85 0.25 0.1]);
+            plot(SW.f, SW.spq(2,:), ':','Color',[0.85 0.25 0.1]);
+        end
         plot([min(SW.f) max(SW.f)], [1 1], 'k--','LineWidth',1.2);
         set(gca,'XScale','log'); xlabel('f dwell [Hz]'); ylabel('speedup vs spiral');
         title('serpentine speedup (median, IQR dotted)');

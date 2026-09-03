@@ -613,3 +613,43 @@ the conventional spiral already is near-optimal in this regime.
 
 The `(0,1)` case returns the near-stationary solution (`J_u = 0`, 8.6 %
 coverage), which is the pipeline sanity check the spec asks for.
+
+### f_dwell sweep — the expected bottleneck transition does not happen
+
+Run at (Q,R) = (1,0), because at (1,1) the optimum trades coverage away to save
+control effort and often never reaches the 95 % reference, leaving the speedup
+undefined. The sweep is a speed question, so it belongs at (1,0).
+
+| f_dwell [Hz] | bottleneck | t_conv [s] | t_ref [s] | J_x spiral | J_x serpentine | speedup |
+|---|---|---|---|---|---|---|
+| 100  | centripetal | 16.36 | 9.79 | 0.0353 | 0.1016 | 0.94 |
+| 250  | centripetal | 16.36 | 9.20 | 0.0274 | 0.1101 | 0.89 |
+| 500  | centripetal | 16.36 | 9.20 | 0.0273 | 0.1070 | 0.88 |
+| 1000 | centripetal | 16.36 | 9.20 | 0.0272 | 0.1056 | 0.90 |
+| 2000 | centripetal | 16.36 | 9.20 | 0.0272 | 0.1063 | 0.86 |
+
+The spec expects a dwell-limited regime at low `f_dwell` turning into a
+slew-limited one at high `f_dwell`, and predicts the pattern optimisation pays
+off most in the dwell-limited part. Neither happens here: `t_conv` is
+**16.36 s at every frequency** and the bottleneck is **centripetal
+throughout**. With `nu = 34` the spiral only needs `N_spiral = 919` dwells, so
+the dwell-spacing cap `2*r_beam*f` is already looser than `sqrt(a*R_curv)` at
+100 Hz. Raising the beam control frequency buys nothing for the conventional
+scan in this regime — the mount's acceleration limit is what binds, and the
+speedup stays flat at 0.86-0.94 across a 20x change in `f_dwell`.
+
+That transition would reappear at much larger `nu` (a bigger uncertainty
+region needs many more dwells), but as noted above the larger-`nu` scenarios
+are exactly the ones where the conventional spiral can no longer finish inside
+the pass.
+
+### Caveats
+
+* Compute budget, not the spec's matrix: 4 trials x 2 starts x 700 evals
+  (`(0,1)`: 1 x 1 x 150), optimising on 500 points and validating on 2000, in
+  place of 30 trials x 8 starts x 5000 evals on 2000 points. Trial-to-trial
+  spread is small (speedup IQR [0.868, 0.896] at (1,0)), so the ranking is not
+  budget-limited, but the absolute optima are not fully converged.
+* `dt_prop = 2 h` rather than 6 h, for the reason given above.
+* One pass geometry (peak elevation 60 deg). The conclusion that centre-out
+  ordering suits a Gaussian cloud is general; the exact speedup is not.
