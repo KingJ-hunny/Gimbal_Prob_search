@@ -653,3 +653,84 @@ the pass.
 * `dt_prop = 2 h` rather than 6 h, for the reason given above.
 * One pass geometry (peak elevation 60 deg). The conclusion that centre-out
   ordering suits a Gaussian cloud is general; the exact speedup is not.
+
+### Correction — the baseline was not held to the actuator limit
+
+The numbers above were produced with a spiral that **violated the
+acceleration limit**. The serpentine passed `dacq_objective`'s feasibility
+test on every evaluation; the spiral was built by `dacq_spiral` with its own
+internal speed caps and never went through that test:
+
+| | max abs acc [deg/s^2] | viol |
+|---|---|---|
+| serpentine best | 4.29 / 2.17 | 0.000 |
+| spiral (old) | 144 / 185 | 35.9 |
+
+`v <= sqrt(a*R_curv)` bounds only the **centripetal** term and leaves the
+tangential term free; the traverse then ended by setting the speed to zero in
+one sample, a velocity step. Two further layers appeared while fixing it: a
+forward-backward profile bounding the total acceleration fixed the physics but
+not the sampling (near the end one theta node spans ~47 dwell samples, so
+linear interpolation holds the speed constant inside the node and kinks at its
+edge), and marching arclength against a fixed s-grid quantised theta into a
+staircase near the centre. The working version marches theta itself forward in
+time on the dwell grid and brakes at the actuator limit:
+max abs acc 4.52 deg/s^2, viol 0.000.
+
+**Re-run against the feasible, budget-matched baseline** (4 trials x 2 starts
+x 700 evals):
+
+| | frac | t_reach [s] | speedup | J_x | J_u |
+|---|---|---|---|---|---|
+| conventional spiral | 1.000 | **8.63** | 1.00 | **0.0270** | 0.7555 |
+| serpentine (1,0) | 0.969 | 9.65 [9.45, 9.76] | **0.894** [0.856, 0.905] | 0.106 | 0.253 |
+| serpentine (1,1) | 0.935 | never reaches 95 % | — | 0.151 | **0.080** |
+
+The conclusion is unchanged, and for a reason worth stating: the violation sat
+at the traverse end (t = 16.4 s) while the reported `t_ref` is 8.6-9.2 s, so
+the coverage result never depended on it. Holding the spiral to the *same*
+budget the serpentine gets makes it **faster** (9.20 -> 8.63 s), so the
+serpentine's speedup falls slightly, 0.90 -> 0.89. The control-effort contrast
+widens: 0.7555 vs 0.080, a factor of 9.4.
+
+### Dwell limit vs actuator limit — they are different things
+
+They were easy to conflate because all three caps reduce to a speed:
+
+```
+v_max = min( w_max , sqrt(a_max * R_curv) , 2*r_beam*f_dwell )
+        \___________ actuator ___________/   \___ dwell ___/
+```
+
+* **Actuator** — what the *mount* can do. Continuous-time, a hard constraint:
+  violating it is physically impossible. Note it is not only `w_max`: holding
+  a curve of radius `R` costs centripetal acceleration `v^2/R`, so
+  `v <= sqrt(a_max*R)`.
+* **Dwell** — what the *shot rate* can tile. Discrete: violating it is
+  perfectly possible, it just leaves gaps between consecutive footprints.
+
+The distinction is sharpest in the area coverage rate. With footprint spacing
+`d = v/f`:
+
+```
+d <= 2*r_beam  (overlapping) : rate = 2*r_beam*v        -- faster v helps
+d >  2*r_beam  (separated)   : rate = f*pi*r_beam^2     -- faster v does nothing
+=> rate = 2*r_beam * min( v_actuator , 2*r_beam*f_dwell )
+```
+
+so **dwell-limited** means rate grows with `f`, and **actuator-limited** means
+raising `f` buys nothing at all. Measured here:
+
+| cap | value |
+|---|---|
+| actuator, centripetal at `Om_max` | **0.884 deg/s** (binds) |
+| actuator, slew `w_max` | 10.0 deg/s |
+| dwell, `2*r_beam*f` at 500 Hz | 5.556 deg/s |
+| crossover `f = v_act/(2*r_beam)` | **79.6 Hz** |
+
+Above ~80 Hz the problem is actuator-limited, which is why the whole
+100-2000 Hz sweep came back "centripetal" with `t_conv` flat at 16 s. That is
+a property of this scenario, not a bug. The decisive term is the centripetal
+one: slew never binds, but rounding a 684 arcsec (0.19 deg) circle at
+5 deg/s^2 caps the speed near 1 deg/s, more than 10x below the slew limit.
+The spec's two-way dwell/slew classification has no room for it.
