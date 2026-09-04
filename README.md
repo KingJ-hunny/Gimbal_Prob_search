@@ -734,3 +734,27 @@ a property of this scenario, not a bug. The decisive term is the centripetal
 one: slew never binds, but rounding a 684 arcsec (0.19 deg) circle at
 5 deg/s^2 caps the speed near 1 deg/s, more than 10x below the slew limit.
 The spec's two-way dwell/slew classification has no room for it.
+
+### Time-coloured sky view (`figures/dacq_skytime.png`)
+
+`main_debris_acq_skytime.m` draws the epoch-by-epoch dwell points of both
+patterns on the absolute az/el sky together with the mean-orbit profile, with
+everything coloured by time on a sequential map (`dacq_seqmap.m`, viridis
+anchors — monotone in lightness, so it reads as an ordering; a hue-cycling map
+like jet would suggest the scan doubles back). Red squares mark where each
+pattern reaches the 95 % reference.
+
+Over the 23.1 s horizon the mean orbit runs az 183.7 -> 185.6 deg,
+el 20.5 -> 23.7 deg, so the +/-684 arcsec scan offsets are about a tenth of
+the track: both scans appear as a ribbon woven along the mean orbit.
+
+The bottom row, offsets from the *moving* centreline, is where the two
+strategies separate:
+
+* the spiral fills its disc **centre-out** — dark (early) at the centre,
+  bright (late) at the rim. That ordering is the order of decreasing
+  probability density, which is exactly why it collects the mass first.
+* the serpentine runs a tight zigzag **diagonally across** the disc, from the
+  trailing edge at t = 0 to well past the leading edge. It sweeps the cloud
+  once, reaching 95 % at 9.5 s just as it leaves the +/-Om_max circle; the
+  remaining third of the horizon is spent pointing outside the cloud.

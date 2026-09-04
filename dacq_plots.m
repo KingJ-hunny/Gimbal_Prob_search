@@ -139,6 +139,72 @@ function dacq_plots(what, pre, cfg, OUTDIR, extra)
         pname = 'dacq_control.png';
 
     % ------------------------------------------------------------------
+    case 'skytime'
+        %  Dwell points of both patterns on the absolute az/el sky, together
+        %  with the mean-orbit (centreline) profile. Everything is coloured by
+        %  TIME with a sequential map, so the reader can see not just where
+        %  each scan goes but in what order -- which is the whole reason the
+        %  centre-out spiral beats the constant-rate serpentine.
+        close(fig);
+        fig = figure('Position',[30 30 1360 640],'Color','w','Visible','off');
+        nb   = 64;  C = dacq_seqmap(nb);
+        t    = pre.tD;  tmax = pre.t_max;
+        bins = min(nb, max(1, floor(t/tmax*nb) + 1));
+        Pser = extra.P;
+        Pset = {pre.Psp, Pser};
+        nm   = {'conventional spiral', 'optimised serpentine'};
+
+        for pn = 1:2
+            P = Pset{pn};
+            % ---- absolute sky: mean orbit + dwell points ----------------
+            subplot(2,2,pn); hold on; grid on; box on;
+            plot(rad2deg(pre.GAM(:,1)), rad2deg(pre.GAM(:,2)), '-', ...
+                 'Color',[0.75 0.75 0.75], 'LineWidth',6);      % locator
+            for j = 1:nb
+                k = find(bins==j);
+                if numel(k) > 1
+                    plot(rad2deg(pre.GAM(k,1)), rad2deg(pre.GAM(k,2)), '-', ...
+                         'Color', C(j,:), 'LineWidth', 3.0);
+                    plot(rad2deg(P(k,1)), rad2deg(P(k,2)), '.', ...
+                         'Color', C(j,:), 'MarkerSize', 2);
+                end
+            end
+            plot(rad2deg(pre.GAM(1,1)), rad2deg(pre.GAM(1,2)), 'ko', ...
+                 'MarkerFaceColor','w','MarkerSize',7);
+            %  mark when this pattern reaches the reference coverage
+            if pn == 1, tref = pre.t_ref; else, tref = extra.t_reach; end
+            if isfinite(tref)
+                kr = min(pre.N_max, max(1, round(tref/pre.dt)+1));
+                plot(rad2deg(P(kr,1)), rad2deg(P(kr,2)), 'ks', ...
+                     'MarkerFaceColor','r','MarkerSize',8);
+            end
+            xlabel('azimuth [deg]'); ylabel('elevation [deg]');
+            title(sprintf('%s: dwells + mean orbit (thick), 95%% at %s s', ...
+                  nm{pn}, fmtnum(tref)));
+
+            % ---- offset from the centreline, same time colouring --------
+            subplot(2,2,2+pn); hold on; grid on; box on; axis equal;
+            for j = 1:nb
+                k = find(bins==j);
+                if numel(k) > 1
+                    plot((P(k,1)-pre.GAM(k,1)).*cos(pre.GAM(k,2))*as, ...
+                         (P(k,2)-pre.GAM(k,2))*as, '.', 'Color', C(j,:), 'MarkerSize', 2);
+                end
+            end
+            thc = linspace(0,2*pi,80);
+            plot(pre.Om_max*as*cos(thc), pre.Om_max*as*sin(thc), 'k--','LineWidth',1.4);
+            xlabel('cross-elevation [arcsec]'); ylabel('elevation [arcsec]');
+            title(sprintf('%s: offset from the moving centreline', nm{pn}));
+        end
+
+        % ---- explicit colourbar (gnuplot does not build one from plot) ---
+        axes('Position',[0.945 0.12 0.014 0.78]);
+        image(1, linspace(0,tmax,nb), reshape(C,[nb 1 3]));
+        set(gca,'YDir','normal','XTick',[],'YAxisLocation','right');
+        ylabel('time since scan start [s]');
+        pname = 'dacq_skytime.png';
+
+    % ------------------------------------------------------------------
     case 'sweep'
         SW = extra;
         subplot(1,2,1); hold on; grid on; box on;
