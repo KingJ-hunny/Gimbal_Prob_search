@@ -1,43 +1,31 @@
 function [P, tTrav] = dacq_spiral(pre, cfg)
 %==========================================================================
-% dacq_spiral  Conventional Archimedean-spiral baseline, centred on the
-%              moving centreline and time-parameterised under the real
-%              limits.
+% dacq_spiral  Conventional Archimedean baseline, ACTUATOR-FEASIBLE.
 %
-%   r = b*theta with b = c_pitch*(2 r_beam)/(2 pi), so adjacent turns are one
-%   beam diameter apart. The along-path speed is the minimum of
-%     * the slew cap        (w_max, less the centreline feedforward, and
-%                            de-rated by cos(el) because an on-sky offset
-%                            costs 1/cos(el) on the azimuth axis),
-%     * the dwell-spacing cap 2*r_beam*f_dwell  (consecutive dwells must
-%                            overlap, otherwise the path itself has gaps),
-%     * the centripetal cap sqrt(a_avail * R_curv), which is what slows the
-%                            spiral near its centre.
-%   Whichever cap binds is exactly the "dwell vs slew" bottleneck.
+%   This wraps dacq_spiral2 with the policy that makes the baseline a fair
+%   opponent for the optimised serpentine:
+%
+%     profile 'proper'  the speed profile bounds the TOTAL acceleration
+%                       (tangential and centripetal together) and is marched
+%                       in time on the dwell grid, so the SAMPLED path is
+%                       feasible. The earlier version capped only the
+%                       centripetal term via v <= sqrt(a*R); that leaves the
+%                       tangential term free, and the traverse ended by
+%                       setting the speed to zero in one sample -- a velocity
+%                       step of 145-185 deg/s^2 against a 5 deg/s^2 limit.
+%                       The serpentine was always held to the limit by the
+%                       objective's feasibility test, but the spiral never
+%                       went through that test, so the two were not being
+%                       held to the same standard.
+%     accPolicy 'inst'  the same acceleration budget the serpentine gets
+%                       (a_avail), de-rated by the instantaneous cos(el) that
+%                       converts an on-sky offset into azimuth-axis motion.
+%     useDwell true     the dwell-spacing cap 2*r_beam*f_dwell is kept: a
+%                       conventional spiral is designed to tile without gaps.
+%
+%   The previous behaviour is preserved in dacq_spiral_naive.m for comparison.
 %==========================================================================
-    b     = pre.b;
-    thMax = pre.Om_max / b;
-    th    = linspace(0, thMax, 20000).';
-    Rc    = b*(1+th.^2).^1.5 ./ (th.^2 + 2);        % radius of curvature
-
-    cmin  = cos(max(pre.GAM(:,2)));                  % worst-case az inflation
-    gamAz = max(abs(diff(pre.GAM(:,1))))/pre.dt;     % centreline az rate
-    vSlew = 0.80 * max(cfg.wMax - gamAz, 0.1*cfg.wMax) * cmin;
-    vDwell= 2*cfg.rBeam*cfg.fDwell;
-    aCap  = 0.90 * min(pre.a_avail) * cmin;
-
-    v     = min(min(vSlew, vDwell), sqrt(aCap*Rc));
-    dtdth = b*sqrt(1+th.^2) ./ v;
-    tth   = cumtrapz(th, dtdth);
-
-    tTrav = tth(end);                                % one full traverse
-    thk = interp1(tth, th, pre.tD, 'linear');
-    thk(pre.tD >= tTrav) = thMax;                    % hold once traversed
-    thk(isnan(thk)) = thMax;
-
-    x  = b*thk .* cos(thk);
-    y  = b*thk .* sin(thk);
-    el = pre.GAM(:,2) + y;
-    az = pre.GAM(:,1) + x ./ cos(el);
-    P  = [az, el];
+    opt = struct('accPolicy','inst', 'velFac',1.00, ...
+                 'useDwell',true,    'profile','proper');
+    [P, tTrav] = dacq_spiral2(pre, cfg, opt);
 end
